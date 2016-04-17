@@ -1,10 +1,9 @@
 # kubernetes
 
 git clone https://github.com/carlosesdias/kubernetes.git
-cd kubernetes
+
 
 # Generic Virtual Machine
-
 ## Networking
 export PRIVATE_IP=x.x.x.x
 export PRIVATE_NETMASK=24
