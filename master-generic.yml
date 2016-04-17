@@ -1,0 +1,138 @@
+#cloud-config
+
+hostname: ${MASTER_HOSTNAME}
+
+coreos:
+  etcd2:
+    name: master
+    listen-client-urls: http://${PRIVATE_IP}:2379,http://127.0.0.1:2379
+    listen-peer-urls: http://${PRIVATE_IP}:2380
+    advertise-client-urls: http://${PRIVATE_IP}:2379
+    initial-advertise-peer-urls: http://${PRIVATE_IP}:2380
+    initial-cluster: master=http://${PRIVATE_IP}:2380
+    initial-cluster-token: k8s_etcd
+    initial-cluster-state: new
+  fleet:
+    public-ip: ${PRIVATE_IP}
+    metadata: role=master
+  flannel:
+    etcd_endpoints: http://127.0.0.1:2379
+    interface: ${PRIVATE_IP}
+
+  units:
+    - name: 00-eth0.network
+      runtime: true
+      content: |
+        [Match]
+        Name=eth0
+
+        [Network]
+        DNS=${PUBLIC_DNS_IP}
+        Address=${PUBLIC_IP}/${PUBLIC_NETMASK}
+        Gateway=${PUBLIC_GATEWAY_IP}
+
+    - name: 00-eth1.network
+      runtime: true
+      content: |
+        [Match]
+        Name=eth1
+
+        [Network]
+        Address=${PRIVATE_IP}/${PRIVATE_NETMASK}
+
+    - name: settimezone.service
+      command: start
+      content: |
+        [Unit]
+        Description=Set the time zone
+
+        [Service]
+        ExecStart=/usr/bin/timedatectl set-timezone America/Recife
+        RemainAfterExit=yes
+        Type=oneshot
+
+    - name: etcd2.service
+      command: start
+
+    - name: fleet.service
+      command: start
+
+    - name: flanneld.service
+      command: start
+      drop-ins:
+        - name: 10-env-config.conf
+          content: |
+            [Service]
+             EnvironmentFile=/run/flannel/options.env
+        - name: 50-network-config.conf
+          content: |
+            [Unit]
+            Requires=etcd2.service
+            [Service]
+            ExecStartPre=/usr/bin/etcdctl set /coreos.com/network/config '{"Network":"${POD_NETWORK}", "Backend": {"Type": "vxlan"}}'
+
+    - name: docker.service
+      command: start
+      drop-ins:
+         - name: 40-flannel.conf
+           content: |
+              [Unit]
+              Requires=flanneld.service
+              After=flanneld.service
+
+    - name: kube-apiserver.service
+      command: start
+      content: |
+        [Unit]
+        Description=Kubernetes API Server
+        Requires=etcd2.service
+        After=etcd2.service
+
+        [Service]
+        ExecStart=/opt/bin/kube-apiserver \
+        --bind-address=0.0.0.0 \
+        --secure-port=443 \
+        --kubelet-https=true \
+        --etcd-servers=http://127.0.0.1:2379 \
+        --allow-privileged=true \
+        --service-cluster-ip-range=${SERVICE_IP_RANGE} \
+        --advertise-address=${PRIVATE_IP} \
+        --tls-cert-file=/etc/kubernetes/ssl/apiserver.pem \
+        --tls-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem \
+        --client-ca-file=/etc/kubernetes/ssl/ca.pem \
+        --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
+        Restart=always
+        RestartSec=10
+
+    - name: kube-controller-manager.service
+      command: start
+      content: |
+        [Unit]
+        Description=Kubernetes Controller Manager
+        Requires=kube-apiserver.service
+        After=kube-apiserver.service
+
+        [Service]
+        ExecStart=/opt/bin/kube-controller-manager \
+        --master=http://127.0.0.1:8080 \
+        --leader-elect=true \
+        --service-account-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem \
+        --root-ca-file=/etc/kubernetes/ssl/ca.pem
+        Restart=always
+        RestartSec=10
+
+    - name: kube-scheduler.service
+      command: start
+      content: |
+        [Unit]
+        Description=Kubernetes Scheduler
+        Requires=kube-apiserver.service
+        After=kube-apiserver.service
+
+        [Service]
+        ExecStart=/opt/bin/kube-scheduler \
+        --master=http://127.0.0.1:8080 \
+        --leader-elect=true
+        Restart=always
+        RestartSec=10
+
