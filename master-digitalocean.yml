@@ -67,6 +67,9 @@ coreos:
         After=etcd2.service
 
         [Service]
+        ExecStartPre=-/usr/bin/mkdir -p /opt/bin
+        ExecStartPre=/usr/bin/curl -L -o /opt/bin/kube-apiserver -z /opt/bin/kube-apiserver https://raw.githubusercontent.com/carlosesdias/kubernetes/master/bin/kube-apiserver
+        ExecStartPre=/usr/bin/chmod +x /opt/bin/kube-apiserver
         ExecStart=/opt/bin/kube-apiserver \
         --bind-address=0.0.0.0 \
         --secure-port=443 \
@@ -91,6 +94,9 @@ coreos:
         After=kube-apiserver.service
 
         [Service]
+        ExecStartPre=-/usr/bin/mkdir -p /opt/bin
+        ExecStartPre=/usr/bin/curl -L -o /opt/bin/kube-controller-manager -z /opt/bin/kube-controller-manager https://raw.githubusercontent.com/carlosesdias/kubernetes/master/bin/kube-controller-manager
+        ExecStartPre=/usr/bin/chmod +x /opt/bin/kube-controller-manager
         ExecStart=/opt/bin/kube-controller-manager \
         --master=http://127.0.0.1:8080 \
         --leader-elect=true \
@@ -108,6 +114,9 @@ coreos:
         After=kube-apiserver.service
 
         [Service]
+        ExecStartPre=-/usr/bin/mkdir -p /opt/bin
+        ExecStartPre=/usr/bin/curl -L -o /opt/bin/kube-scheduler -z /opt/bin/kube-scheduler https://raw.githubusercontent.com/carlosesdias/kubernetes/master/bin/kube-scheduler
+        ExecStartPre=/usr/bin/chmod +x /opt/bin/kube-scheduler
         ExecStart=/opt/bin/kube-scheduler \
         --master=http://127.0.0.1:8080 \
         --leader-elect=true
