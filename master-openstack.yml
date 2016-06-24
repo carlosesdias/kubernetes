@@ -1,0 +1,125 @@
+#cloud-config
+
+coreos:
+  etcd2:
+    name: master
+    listen-client-urls: http://$private_ipv4:2379,http://127.0.0.1:2379
+    listen-peer-urls: http://$private_ipv4:2380
+    advertise-client-urls: http://$private_ipv4:2379
+    initial-advertise-peer-urls: http://$private_ipv4:2380
+    initial-cluster: master=http://$private_ipv4:2380
+    initial-cluster-token: k8s_etcd
+    initial-cluster-state: new
+  fleet:
+    public-ip: $private_ipv4
+    metadata: role=master
+  flannel:
+    etcd_endpoints: http://127.0.0.1:2379
+    interface: $private_ipv4
+
+  units:
+    - name: settimezone.service
+      command: start
+      content: |
+        [Unit]
+        Description=Set the time zone
+
+        [Service]
+        ExecStart=/usr/bin/timedatectl set-timezone America/Recife
+        RemainAfterExit=yes
+        Type=oneshot
+
+    - name: etcd2.service
+      command: start
+
+    - name: fleet.service
+      command: start
+
+    - name: flanneld.service
+      command: start
+      drop-ins:
+        - name: 10-env-config.conf
+          content: |
+            [Service]
+             EnvironmentFile=/run/flannel/options.env
+        - name: 50-network-config.conf
+          content: |
+            [Unit]
+            Requires=etcd2.service
+            [Service]
+            ExecStartPre=/usr/bin/etcdctl set /coreos.com/network/config '{"Network":"10.2.0.0/16", "Backend": {"Type": "vxlan"}}'
+
+    - name: docker.service
+      command: start
+      drop-ins:
+         - name: 40-flannel.conf
+           content: |
+              [Unit]
+              Requires=flanneld.service
+              After=flanneld.service
+
+    - name: kube-apiserver.service
+      command: start
+      content: |
+        [Unit]
+        Description=Kubernetes API Server
+        Requires=etcd2.service
+        After=etcd2.service
+
+        [Service]
+        ExecStartPre=-/usr/bin/mkdir -p /opt/bin
+        ExecStartPre=/usr/bin/curl -L -o /opt/bin/kube-apiserver -z /opt/bin/kube-apiserver https://raw.githubusercontent.com/carlosesdias/kubernetes/master/bin/kube-apiserver
+        ExecStartPre=/usr/bin/chmod +x /opt/bin/kube-apiserver
+        ExecStart=/opt/bin/kube-apiserver \
+        --bind-address=0.0.0.0 \
+        --secure-port=443 \
+        --kubelet-https=true \
+        --etcd-servers=http://127.0.0.1:2379 \
+        --allow-privileged=true \
+        --service-cluster-ip-range=10.3.0.0/24 \
+        --advertise-address=$private_ipv4 \
+        --tls-cert-file=/etc/kubernetes/ssl/apiserver.pem \
+        --tls-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem \
+        --client-ca-file=/etc/kubernetes/ssl/ca.pem \
+        --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
+        Restart=always
+        RestartSec=10
+
+    - name: kube-controller-manager.service
+      command: start
+      content: |
+        [Unit]
+        Description=Kubernetes Controller Manager
+        Requires=kube-apiserver.service
+        After=kube-apiserver.service
+
+        [Service]
+        ExecStartPre=-/usr/bin/mkdir -p /opt/bin
+        ExecStartPre=/usr/bin/curl -L -o /opt/bin/kube-controller-manager -z /opt/bin/kube-controller-manager https://raw.githubusercontent.com/carlosesdias/kubernetes/master/bin/kube-controller-manager
+        ExecStartPre=/usr/bin/chmod +x /opt/bin/kube-controller-manager
+        ExecStart=/opt/bin/kube-controller-manager \
+        --master=http://127.0.0.1:8080 \
+        --leader-elect=true \
+        --service-account-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem \
+        --root-ca-file=/etc/kubernetes/ssl/ca.pem
+        Restart=always
+        RestartSec=10
+
+    - name: kube-scheduler.service
+      command: start
+      content: |
+        [Unit]
+        Description=Kubernetes Scheduler
+        Requires=kube-apiserver.service
+        After=kube-apiserver.service
+
+        [Service]
+        ExecStartPre=-/usr/bin/mkdir -p /opt/bin
+        ExecStartPre=/usr/bin/curl -L -o /opt/bin/kube-scheduler -z /opt/bin/kube-scheduler https://raw.githubusercontent.com/carlosesdias/kubernetes/master/bin/kube-scheduler
+        ExecStartPre=/usr/bin/chmod +x /opt/bin/kube-scheduler
+        ExecStart=/opt/bin/kube-scheduler \
+        --master=http://127.0.0.1:8080 \
+        --leader-elect=true
+        Restart=always
+        RestartSec=10
+
